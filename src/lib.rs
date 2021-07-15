@@ -65,11 +65,8 @@ impl <'a,T> Iterator for ChunkBlock<'a,T>  where T:Clone,T:Default, T:Debug{
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        println!("Called next, chunk_idx: {}, data_idx: {}", self.current_chunk_index, self.in_chunk_index);
         if let Some(chunk) = self.current_chunk(){
-            println!("Chunk found");
             if chunk.used > self.in_chunk_index{
-                println!("Chunk contains next data at {}", self.in_chunk_index);
                 let data = &chunk.data[self.in_chunk_index];
                 self.in_chunk_index += 1;
                 return Some(data)
@@ -78,10 +75,8 @@ impl <'a,T> Iterator for ChunkBlock<'a,T>  where T:Clone,T:Default, T:Debug{
                 // the current chunk did not hold more data, let's retry with the next chunk
                 self.current_chunk_index += 1;
                 self.in_chunk_index = 0;
-                println!("Next chunk may contain data");
                 if let Some(chunk) = self.current_chunk(){
                     if chunk.used > self.in_chunk_index{
-                        println!("New Chunk contains next data at {}", self.in_chunk_index);
                         let data = &chunk.data[self.in_chunk_index];
                         self.in_chunk_index += 1;
                         return Some(data)
@@ -120,7 +115,6 @@ impl <'a,T> ChunkBlock<'a,T>  where T:Clone,T:Default, T:Debug{
         let index = self.current_chunk_index;
         match self.chunks {
             ChunkBlockData::One(block) => {
-                println!("Working with ONE chunk, len: {}, idx: {}", block.len(),index);
                 if block.len() > index{
                     Some(&block[index])
                 }
@@ -129,7 +123,6 @@ impl <'a,T> ChunkBlock<'a,T>  where T:Clone,T:Default, T:Debug{
                 }
             },
             ChunkBlockData::Two(block_0, block_1) => {
-                println!("Working with TWO chunks, len_0: {}, len_1: {}, idx: {}", block_0.len(), block_1.len(), index);
                 if block_0.len() > index{
                     Some(&block_0[index])
                 }
@@ -188,30 +181,18 @@ impl<T> HubsInner<T> where T:Clone, T:Default, T:Debug{
     fn get_read_chunks_current(&self) -> ChunkBlock<T>{
 
         if self.is_write_block_borrowed.load(Ordering::SeqCst) {
-            println!("----- Already borrowed");
             return ChunkBlock::empty()
         }
 
         let read_end = self.write_barrier.load(Ordering::SeqCst);
         let read_start = self.read_ptr.load(Ordering::SeqCst);
-        println!("----- Trying to read,  read_start({}) < read_end({})",read_start, read_end);
 
         if read_start == read_end {
-            println!("Nothing to read, read_start = read_end = {}",read_start);
             return ChunkBlock::empty()
         }
-        // else if read_start < read_end {
-            println!("Readable, read_start({}) < read_end({})",read_start, read_end);
-
-            // we can actually read something
-            // we MUST set the read_end to ensure this area is not again borrowed readable (see return chunk)
-            // we MUST NOT set the barrier, this has to be done upon returning data
-            self.read_ptr.store(read_end, Ordering::SeqCst);
-            // println!("Stored read_end: {}", read_end);
-        // }
-        // else {
-        //     panic!("Hubs got unsafe, abort")
-        // }
+        
+        self.read_ptr.store(read_end, Ordering::SeqCst);
+        
 
         // this is tricky, we need to close the ring
         let chunks = if read_start > read_end {
@@ -235,8 +216,6 @@ impl<T> HubsInner<T> where T:Clone, T:Default, T:Debug{
         let write_pos = self.write_ptr.load(Ordering::SeqCst);        
         let write_barrier = self.write_barrier.load(Ordering::SeqCst);
 
-        // println!("Full, write_pos {}, write_barrier {}", write_pos, write_barrier);
-
         if write_pos!=write_barrier {
             panic!("Cant borrow more than one chunk")
         }
@@ -244,11 +223,7 @@ impl<T> HubsInner<T> where T:Clone, T:Default, T:Debug{
         let read_barrier = self.read_barrier.load(Ordering::SeqCst);
 
         if read_barrier == write_pos{
-            println!("Full, read_barrier {}, write_pos {}, write_barrier{}", read_barrier, write_pos, write_barrier);
             return None;
-        }
-        else{
-            println!("Not full, read_barrier {}, write_pos {}, write_barrier{}", read_barrier, write_pos, write_barrier);
         }
 
         let next_write_pos = (write_pos + 1) % HUBS_SIZE;
@@ -268,7 +243,6 @@ impl<T> HubsInner<T> where T:Clone, T:Default, T:Debug{
         let mut  read_ptr = self.read_ptr.load(Ordering::SeqCst);
         read_ptr =  ( HUBS_SIZE + read_ptr - 1 ) % HUBS_SIZE;
         self.read_barrier.store(read_ptr, Ordering::SeqCst);
-        println!("Did update read barrier to {}",read_ptr);
         self.is_write_block_borrowed.store(false,Ordering::SeqCst)
     }
 
@@ -278,8 +252,6 @@ impl<T> HubsInner<T> where T:Clone, T:Default, T:Debug{
         write_barrier = (write_barrier + 1) % HUBS_SIZE;
         if write_pos == write_barrier {
             self.write_barrier.store(write_barrier, Ordering::SeqCst);
-            // println!("Commit, write_barrier {}, chunk: {:?}", write_barrier ,write_access.chunk);
-
         }
         else  {
             panic!("Nope, cannot do that")
@@ -425,7 +397,6 @@ mod tests {
                         chunk.commit();       
                     }
                     None => {
-                        println!("Hubs was full at i = {}",i);
                         return i;
                     }
                 }
@@ -458,14 +429,13 @@ mod tests {
                 loop{
                     match tx.borrow_chunk_mut(){
                         Some(chunk) => {
-                            println!("writingg with {}", i);
+                            // println!("writingg with {}", i);
                             chunk.chunk.data[0] = i ;
                             chunk.chunk.used = 1;
                             chunk.commit();   
                             break
                         }
                         None => {
-                            println!("Hubs was full at i = {}",i);
                             sleep(Duration::from_millis(10))
                         }
                     }
@@ -480,13 +450,11 @@ mod tests {
         let mut ctr = 0;
 
         loop  {
-            println!("looping");
             for i in rx.get_chunks_for_tick().into_iter(){
                 assert_eq!(*i, ctr);
                 // println!("---------------------------------- Item val = {} ctr = {}",*i, ctr);
                 ctr +=1;
             }
-            println!("Tick block finished, ctr = {}", ctr);
             if mpsc_rx.try_recv().is_ok() {
                 // empty and other thread signals that they are done -> we are done too
                 break
@@ -508,7 +476,7 @@ mod tests {
 
         let (mpsc_tx, mpsc_rx) =  mpsc::channel();
 
-        let total_msg = 1_000_000;
+        let total_msg = 10_000_000;
 
         let j = thread::spawn(move || {
             for i in 0 .. total_msg{
