@@ -1,17 +1,19 @@
-use std::{cell::UnsafeCell, fmt::Debug, rc::Rc, sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}}};
+use std::{cell::UnsafeCell, fmt::Debug, sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}}};
 
 
 
 
 
-const HUBS_SIZE: usize = 128;
+const HUBS_SIZE: usize = 4096;
+const CHUNK_SIZE: usize = 4096;
 
 
 pub struct Hubs<T>{
     inner: HubsInner<T>
 }
 impl<T> Hubs<T> where T:Clone,T:Default, T:Debug{
-    fn split(self) -> (HubsProducer<T>, HubsConsumer<T>){
+
+    pub fn split(self) -> (HubsProducer<T>, HubsConsumer<T>){
         let inner = Arc::new(self.inner);
         let tx = HubsProducer{
             inner: Arc::clone(&inner)
@@ -21,24 +23,73 @@ impl<T> Hubs<T> where T:Clone,T:Default, T:Debug{
         };
         (tx,rx)
     }
-    fn new() -> Self{
+
+    pub fn new(initializer: &dyn HubsInitializer<T=T>) -> Self{
 
         let mut chunks = Vec::with_capacity(128);
-        for i in 0..HUBS_SIZE{
-            chunks.push(Chunk::new());
+        for _i in 0..HUBS_SIZE{
+            chunks.push(Chunk::new(initializer));
         }
         let chunks = chunks.into_boxed_slice();
 
         Hubs{
            inner: HubsInner{
-            chunks: UnsafeCell::from(chunks),
-            read_ptr: AtomicUsize::new(0),
-            read_barrier: AtomicUsize::new(HUBS_SIZE-1),
-            write_ptr: AtomicUsize::new(0),
-            write_barrier: AtomicUsize::new(0),
-            is_write_block_borrowed: AtomicBool::new(false)
-        } 
+                chunks: UnsafeCell::from(chunks),
+                read_ptr: AtomicUsize::new(0),
+                read_barrier: AtomicUsize::new(HUBS_SIZE-1),
+                write_ptr: AtomicUsize::new(0),
+                write_barrier: AtomicUsize::new(0),
+                is_write_block_borrowed: AtomicBool::new(false)
+            } 
         }
+    }
+
+}
+
+pub trait HubsInitializer{
+    type T;
+    fn initialize_data(&self)-> Self::T;
+}
+
+#[derive(Debug)]
+pub struct Chunk<T>{
+    capacity: usize,
+    pub used: usize,
+    pub data: Box<[T]>
+}
+impl<T> Chunk<T> where T:Clone,T:Default{
+    fn new(initializer: &dyn HubsInitializer<T=T>) -> Self{
+        let mut v = Vec::with_capacity(CHUNK_SIZE);
+        for _ in 0 .. CHUNK_SIZE{
+            v.push(initializer.initialize_data());
+        }
+        Chunk{
+            capacity: 128,
+            used: 0,
+            data: v.into_boxed_slice(),
+        }
+    }
+}
+
+pub struct HubsProducer<T>{
+    inner: Arc<HubsInner<T>>
+}
+pub struct HubsConsumer<T>{
+    inner: Arc<HubsInner<T>>
+}
+
+impl<T> HubsConsumer<T> where T:Clone,T:Default, T:Debug{
+    pub fn get_chunks_for_tick(&self) -> ChunkBlock<T>{
+        self.inner.get_read_chunks_current()
+    }
+}
+
+impl<T> HubsProducer<T> where T:Clone,T:Default, T:Debug{
+    pub fn borrow_chunk_mut(&mut self) -> Option<HubsWriteAccess<T>>{
+        self.inner.borrow_chunk_mut()
+    }
+    pub fn commit_chunk(&self, write_access: HubsWriteAccess<T>){
+        self.inner.commit_chunk(write_access)
     }
 }
 
@@ -54,7 +105,7 @@ struct HubsInner<T>{
     is_write_block_borrowed: AtomicBool
 }
 
-struct ChunkBlock<'a,T>  where T:Clone,T:Default, T:Debug{
+pub struct ChunkBlock<'a,T>  where T:Clone,T:Default, T:Debug{
     chunks: ChunkBlockData<'a, T>,
     parent: Option<&'a HubsInner<T>>,
     current_chunk_index: usize,
@@ -164,13 +215,13 @@ impl <'a,T> Drop for ChunkBlock<'a,T>  where T:Clone,T:Default, T:Debug{
     }
 }
 
-struct HubsWriteAccess<'a,T> {
+pub struct HubsWriteAccess<'a,T> {
     pub chunk: &'a mut Chunk<T>,
     parent: &'a HubsInner<T>
 }
 
 impl <'a,T> HubsWriteAccess<'a,T> where T:Clone,T:Default, T:Debug{
-    fn commit(self) {
+    pub fn commit(self) {
         self.parent.commit_chunk(self);
     }
 }
@@ -246,7 +297,7 @@ impl<T> HubsInner<T> where T:Clone, T:Default, T:Debug{
         self.is_write_block_borrowed.store(false,Ordering::SeqCst)
     }
 
-    fn commit_chunk(&self, write_access: HubsWriteAccess<T>){
+    fn commit_chunk(&self, _write_access: HubsWriteAccess<T>){
         let write_pos = self.write_ptr.load(Ordering::SeqCst);        
         let mut write_barrier = self.write_barrier.load(Ordering::SeqCst);
         write_barrier = (write_barrier + 1) % HUBS_SIZE;
@@ -262,43 +313,7 @@ impl<T> HubsInner<T> where T:Clone, T:Default, T:Debug{
 
 
 
-#[derive(Debug)]
-struct Chunk<T>{
-    capacity: usize,
-    used: usize,
-    data: Box<[T]>
-}
-impl<T> Chunk<T> where T:Clone,T:Default{
-    fn new() -> Self{
-        Chunk{
-            capacity: 128,
-            used: 0,
-            data: vec![T::default();128].into_boxed_slice(),
-        }
-    }
-}
 
-struct HubsProducer<T>{
-    inner: Arc<HubsInner<T>>
-}
-struct HubsConsumer<T>{
-    inner: Arc<HubsInner<T>>
-}
-
-impl<T> HubsConsumer<T> where T:Clone,T:Default, T:Debug{
-    fn get_chunks_for_tick(&self) -> ChunkBlock<T>{
-        self.inner.get_read_chunks_current()
-    }
-}
-
-impl<T> HubsProducer<T> where T:Clone,T:Default, T:Debug{
-    fn borrow_chunk_mut(&mut self) -> Option<HubsWriteAccess<T>>{
-        self.inner.borrow_chunk_mut()
-    }
-    fn commit_chunk(&self, write_access: HubsWriteAccess<T>){
-        self.inner.commit_chunk(write_access)
-    }
-}
 
 
 // unsafe cell
@@ -315,13 +330,22 @@ mod tests {
 
     use std::{sync::mpsc, thread::{self, sleep}, time::Duration};
 
-    use crate::HUBS_SIZE;
+    use crate::{HUBS_SIZE, HubsInitializer};
 
     use super::Hubs;
     
+    struct HubsInitializerU64{}
+    impl HubsInitializer for HubsInitializerU64{
+        type T = u64;
+
+        fn initialize_data(&self)-> Self::T {
+            0
+        }
+    }
+
     #[test]
     fn test_write_single() {
-        let hubs :Hubs<u8> = Hubs::new();
+        let hubs = Hubs::new(&HubsInitializerU64{});
         let (mut tx,rx) = hubs.split();
 
         let chunk = tx.borrow_chunk_mut().unwrap();
@@ -329,13 +353,13 @@ mod tests {
         chunk.chunk.used += 1;
         chunk.commit();
 
-        assert_eq!(* rx.get_chunks_for_tick().into_iter().next().unwrap(), 42 as u8);
+        assert_eq!(* rx.get_chunks_for_tick().into_iter().next().unwrap(), 42 );
         assert_eq!( rx.get_chunks_for_tick().into_iter().next(), None);        
     }
 
     #[test]
     fn test_dirty_write() {
-        let hubs :Hubs<u8> = Hubs::new();
+        let hubs = Hubs::new(&HubsInitializerU64{});
         let (mut tx,rx) = hubs.split();
 
         let chunk = tx.borrow_chunk_mut().unwrap();
@@ -349,12 +373,12 @@ mod tests {
 
     #[test]
     fn test_weird_api_stuff() {
-        assert_eq!( Hubs::<()>::new().split().1.get_chunks_for_tick().into_iter().into_iter().into_iter().into_iter().next(), None);        
+        assert_eq!( Hubs::new(&HubsInitializerU64{}).split().1.get_chunks_for_tick().into_iter().into_iter().into_iter().into_iter().next(), None);        
     }
 
     #[test]
     fn test_basic_usage() {
-        let hubs :Hubs<u128> = Hubs::new();
+        let hubs = Hubs::new(&HubsInitializerU64{});
         let (mut tx,rx) = hubs.split();
 
         let j = thread::spawn(move || {
@@ -362,7 +386,7 @@ mod tests {
                 match tx.borrow_chunk_mut(){
                     Some(chunk) => {
                         for k in 0 .. 9 {
-                            chunk.chunk.data[k] = i*k as u128;
+                            chunk.chunk.data[k] = i*k as u64;
                             chunk.chunk.used += 1;
                         }
                         chunk.commit();
@@ -377,7 +401,7 @@ mod tests {
         let mut iter = rx.get_chunks_for_tick().into_iter();
         for i in 0 .. 7{
             for k in 0 .. 9{
-                assert_eq!(*iter.next().unwrap(), i*k as u128);
+                assert_eq!(*iter.next().unwrap(), i*k as u64);
             }
         } 
         assert_eq!(iter.next(), None);        
@@ -385,14 +409,14 @@ mod tests {
 
     #[test]
     fn test_full() {
-        let hubs :Hubs<u8> = Hubs::new();
+        let hubs = Hubs::new(&HubsInitializerU64{});
         let (mut tx,rx) = hubs.split();
 
         let j = thread::spawn(move || {
             for i in 0 .. 200{
                 match tx.borrow_chunk_mut(){
                     Some(chunk) => {
-                        chunk.chunk.data[0] = i as u8;
+                        chunk.chunk.data[0] = i as u64;
                         chunk.chunk.used += 1;
                         chunk.commit();       
                     }
@@ -409,14 +433,14 @@ mod tests {
 
         let mut iter = rx.get_chunks_for_tick().into_iter();
         for i in 0 .. amt{
-                assert_eq!(*iter.next().unwrap(), i as u8);
+                assert_eq!(*iter.next().unwrap(), i as u64);
         } 
         assert_eq!(iter.next(), None);            
     }
 
     #[test]
     fn test_refill() {
-        let hubs :Hubs<u32> = Hubs::new();
+        let hubs = Hubs::new(&HubsInitializerU64{});
         let (mut tx,rx) = hubs.split();
 
         let (mpsc_tx, mpsc_rx) =  mpsc::channel();
@@ -470,13 +494,48 @@ mod tests {
     }
 
     #[test]
-    fn test_stress() {
-        let hubs :Hubs<u32> = Hubs::new();
+    fn test_stress_small(){
+        test_stress(      1);
+        test_stress(     10);
+        test_stress(    100);
+        test_stress(  1_000);
+        test_stress( 10_000);
+        test_stress(100_000);
+
+        test_stress(35_251);
+        test_stress(23_339);
+
+
+        test_stress(HUBS_SIZE  as u64 - 1);
+        test_stress(HUBS_SIZE  as u64    );
+        test_stress(HUBS_SIZE  as u64 + 1);
+
+        test_stress(HUBS_SIZE  as u64 / 2);
+        test_stress(HUBS_SIZE  as u64 * 2);
+
+        test_stress_multiple_data(    1,  1);
+        test_stress_multiple_data(   10, 10);
+        test_stress_multiple_data  (100,100);
+        test_stress_multiple_data(1_000, 10);
+
+        test_stress_multiple_data(1_000, 128);
+        test_stress_multiple_data(1_000, 127);
+
+    }
+
+    #[test]
+    #[ignore = "takes long"]
+    fn test_stress_large(){
+        test_stress( 10_000_000);
+    }
+    
+    fn test_stress(amt: u64) {
+        let hubs = Hubs::new(&HubsInitializerU64{});
         let (mut tx,rx) = hubs.split();
 
         let (mpsc_tx, mpsc_rx) =  mpsc::channel();
 
-        let total_msg = 10_000_000;
+        let total_msg = amt;
 
         let j = thread::spawn(move || {
             for i in 0 .. total_msg{
@@ -516,7 +575,60 @@ mod tests {
        
         assert_eq!( rx.get_chunks_for_tick().into_iter().next(), None);        
         assert_eq!(ctr, total_msg);
-        j.join().unwrap();        
+        j.join().unwrap();       
+    }
 
+
+
+
+
+    fn test_stress_multiple_data(chunk_count: usize, data_count: usize) {
+        let hubs = Hubs::new(&HubsInitializerU64{});
+        let (mut tx,rx) = hubs.split();
+    
+        let (mpsc_tx, mpsc_rx) =  mpsc::channel();
+    
+    
+        let j = thread::spawn(move || {
+            let mut ctr = 0;
+            for i in 0 .. chunk_count{
+                loop{
+                    match tx.borrow_chunk_mut(){
+                        Some(chunk) => {
+                            for k in 0 .. data_count{
+                                chunk.chunk.data[k] = ctr;
+                                ctr += 1;
+                            }
+                            chunk.chunk.used = data_count;
+                            chunk.commit();   
+                            break
+                        }
+                        None => {
+                            sleep(Duration::from_nanos(10))
+                        }
+                    }
+                }
+            }
+            mpsc_tx.send(0u8).unwrap();
+        });
+    
+        sleep(Duration::from_millis(1));
+    
+        let mut ctr = 0;
+    
+        loop  {
+            for i in rx.get_chunks_for_tick().into_iter(){
+                assert_eq!(*i,ctr);
+                ctr +=1;
+            }
+            if mpsc_rx.try_recv().is_ok() {
+                break
+            }                            
+            sleep(Duration::from_millis(1));
+        }
+       
+        assert_eq!( rx.get_chunks_for_tick().into_iter().next(), None);        
+        assert_eq!(ctr as usize, chunk_count*data_count);
+        j.join().unwrap();       
     }
 }
