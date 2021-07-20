@@ -39,7 +39,7 @@ impl<T> Hubs<T> where T:Clone,T:Default, T:Debug{
                 read_barrier: AtomicUsize::new(HUBS_SIZE-1),
                 write_ptr: AtomicUsize::new(0),
                 write_barrier: AtomicUsize::new(0),
-                is_write_block_borrowed: AtomicBool::new(false)
+                // is_write_block_borrowed: AtomicBool::new(false)
             } 
         }
     }
@@ -102,7 +102,7 @@ struct HubsInner<T>{
     read_ptr: AtomicUsize,
     write_ptr: AtomicUsize,
     write_barrier: AtomicUsize,
-    is_write_block_borrowed: AtomicBool
+    // is_write_block_borrowed: AtomicBool
 }
 
 pub struct ChunkBlock<'a,T>  where T:Clone,T:Default, T:Debug{
@@ -231,9 +231,9 @@ impl <'a,T> HubsWriteAccess<'a,T> where T:Clone,T:Default, T:Debug{
 impl<T> HubsInner<T> where T:Clone, T:Default, T:Debug{
     fn get_read_chunks_current(&self) -> ChunkBlock<T>{
 
-        if self.is_write_block_borrowed.load(Ordering::SeqCst) {
-            return ChunkBlock::empty()
-        }
+        // if self.is_write_block_borrowed.load(Ordering::SeqCst) {
+        //     return ChunkBlock::empty()
+        // }
 
         let read_end = self.write_barrier.load(Ordering::SeqCst);
         let read_start = self.read_ptr.load(Ordering::SeqCst);
@@ -258,7 +258,7 @@ impl<T> HubsInner<T> where T:Clone, T:Default, T:Debug{
 
 
         // println!("Chunks: {:?}", chunks);
-        self.is_write_block_borrowed.store(true, Ordering::SeqCst);
+        // self.is_write_block_borrowed.store(true, Ordering::SeqCst);
         ChunkBlock::new(chunks, &self)
     }
 
@@ -288,13 +288,21 @@ impl<T> HubsInner<T> where T:Clone, T:Default, T:Debug{
     }
 
     fn return_chunk_block(&self, _block: &mut ChunkBlock<T>){
-        if ! self.is_write_block_borrowed.load(Ordering::SeqCst) {
+        // if ! self.is_write_block_borrowed.load(Ordering::SeqCst) {
+        //     panic!("Tried to return block to hubs that has no block given out")
+        // }
+
+        let read_end = self.write_barrier.load(Ordering::SeqCst);
+        let mut read_ptr = self.read_ptr.load(Ordering::SeqCst);
+
+        if read_ptr != read_end {
             panic!("Tried to return block to hubs that has no block given out")
         }
-        let mut  read_ptr = self.read_ptr.load(Ordering::SeqCst);
+
+        // let mut  read_ptr = self.read_ptr.load(Ordering::SeqCst);
         read_ptr =  ( HUBS_SIZE + read_ptr - 1 ) % HUBS_SIZE;
         self.read_barrier.store(read_ptr, Ordering::SeqCst);
-        self.is_write_block_borrowed.store(false,Ordering::SeqCst)
+        // self.is_write_block_borrowed.store(false,Ordering::SeqCst)
     }
 
     fn commit_chunk(&self, _write_access: HubsWriteAccess<T>){
