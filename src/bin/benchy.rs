@@ -12,14 +12,23 @@ impl HubsInitializer for HubsInitializerU64{
     }
 }
 fn main(){
-    let start = Instant::now();
-    test_ref(10_000_000,   1024);
-    println!("Duration ref  : {}us", start.elapsed().as_micros());
-
-    let hubs = Hubs::new(&HubsInitializerU64{});
-    let start = Instant::now();
-    test_stress(10_000_000,   1024, hubs);
-    println!("Duration hubs : {}us", start.elapsed().as_micros());
+    let args = std::env::args().collect::<Vec<String>>();    
+    let mode =  args.get(1).expect("Argument for mode");
+    match mode.as_str(){
+        "ref" => {
+            let start = Instant::now();
+            test_ref(1_000_000,   1024);
+            println!("Duration ref  : {}us", start.elapsed().as_micros());
+        
+        },
+        "hubs" => {
+            let hubs = Hubs::new(&HubsInitializerU64{});
+            let start = Instant::now();
+            test_stress(1_000_000,   1024, hubs);
+            println!("Duration hubs : {}us", start.elapsed().as_micros());
+        },
+        _ => panic!("unknown mode")
+    }
 }
 
 fn test_ref(chunk_count: usize, data_count: usize) {
@@ -30,7 +39,7 @@ fn test_ref(chunk_count: usize, data_count: usize) {
     let j = thread::spawn(move || {
         let mut data = Some(vec![0;4096].into_boxed_slice());
         let mut ctr = 0;
-        for i in 0 .. chunk_count{
+        for _ in 0 .. chunk_count{
             if let Some(ref mut data) = data{
                 for k in 0 .. data_count{
                     data[k] = ctr;
@@ -39,7 +48,7 @@ fn test_ref(chunk_count: usize, data_count: usize) {
             }
 
             let mut x = None;
-            replace(&mut x, data);            
+            let _ = replace(&mut x, data);            
             mpsc_tx.send(x).unwrap();
             data = back_rx.recv().unwrap();
         }
@@ -54,15 +63,14 @@ fn test_ref(chunk_count: usize, data_count: usize) {
 
     });
 
-    sleep(Duration::from_millis(1));
+    sleep(Duration::from_millis(10));
 
-    let mut data = Some(vec![0;4096].into_boxed_slice());
+    let mut data ;
 
 
     let mut ctr = 0;
-    let mut last_run = false;
     let mut tr = None;
-    for i in 0 .. chunk_count{
+    for _ in 0 .. chunk_count{
         data = mpsc_rx.recv().unwrap();
 
         if let Some(ref mut data) = data{
@@ -72,7 +80,7 @@ fn test_ref(chunk_count: usize, data_count: usize) {
             }
         }
         let mut x = None;
-        replace(&mut x, data);         
+        let _ = replace(&mut x, data);         
         back_tx.send(x).unwrap();
     }
     if tr.is_none() {
@@ -80,7 +88,7 @@ fn test_ref(chunk_count: usize, data_count: usize) {
     }
 
     let res = j.join().unwrap();  
-    println!("res: {}, ctr: {}", res, ctr);
+    println!("res: {}, ctr: {}, tr: {}", res, ctr, tr.is_some());
 }
 
 
@@ -92,7 +100,7 @@ fn test_stress(chunk_count: usize, data_count: usize, hubs: Hubs<u64>) {
 
     let j = thread::spawn(move || {
         let mut ctr = 0;
-        for i in 0 .. chunk_count{
+        for _ in 0 .. chunk_count{
             loop{
                 match tx.borrow_chunk_mut(){
                     Some(chunk) => {
@@ -113,7 +121,7 @@ fn test_stress(chunk_count: usize, data_count: usize, hubs: Hubs<u64>) {
         mpsc_tx.send(0u8).unwrap();
     });
 
-    sleep(Duration::from_millis(1));
+    sleep(Duration::from_millis(10));
 
     let mut ctr = 0;
 

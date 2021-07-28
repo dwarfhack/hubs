@@ -11,13 +11,13 @@ edition = "2018"
 [dev-dependencies]
 criterion = "0.3"
 
-[[bench]]
-name = "stress_test"
-harness = false
+# [[bench]]
+# name = "stress_test"
+# harness = false
 
-[[bin]]
-name = "benchy"
-file = "bin/benchy"
+# [[bin]]
+# name = "benchy"
+# file = "bin/benchy"
 
 
 [profile.release]

@@ -1,24 +1,71 @@
-use std::{cell::UnsafeCell, sync::{Arc, atomic::{ AtomicUsize, Ordering}}};
+//! The Horribly Unsafe Buffer Structure.
+//!
+//! A Data Structure that allows for fast access to pre-allocated data in chunks and allows read-access to all currently comitted chunks in one call.
+//! This is perfect for slow-ticking game loops, since one tick every 20ms or so can easily read hundreds of thousands of items with two atomic operations.
+//! Refer to [Hubs] to get started.
+//! This is not a general ourpose data structure, if you attempt it to use it as such, it might yield terrible performance.
 
-/**
-Global
-*/
 
-
+use std::{cell::UnsafeCell, marker::PhantomData, sync::{Arc, atomic::{ AtomicUsize, Ordering}}};
 
 const HUBS_SIZE: usize = 4096;
 const CHUNK_SIZE: usize = 4096;
 
 /**
 The Hubs data structure used for initialization.
-Access is possible through the xxx and xxx
+Access is possible through the [HubsProducer] and [HubsConsumer].
 */
 pub struct Hubs<T>{
     inner: HubsInner<T>
 }
+impl<T> Hubs<T> where T: Default{
+
+    /// Create a [Hubs] with a [HubsInitializer] if the item type implements [Default]. 
+    // Upon initialization, all fields will contain the default value.
+    pub fn new_default() -> Self{
+        let initializer = DefaultInitializer::new();
+        let mut chunks = Vec::with_capacity(128);
+        for _i in 0..HUBS_SIZE{
+            chunks.push(Chunk::new(&initializer));
+        }
+        let chunks = chunks.into_boxed_slice();
+
+        Hubs{
+           inner: HubsInner{
+                chunks: UnsafeCell::from(chunks),
+                read_ptr: AtomicUsize::new(0),
+                read_barrier: AtomicUsize::new(HUBS_SIZE-1),
+                write_ptr: AtomicUsize::new(0),
+                write_barrier: AtomicUsize::new(0),
+                capacity: HUBS_SIZE
+            } 
+        }
+    }
+} 
+
+struct DefaultInitializer<T>{_data: PhantomData<T>}
+impl<T : Default> DefaultInitializer<T>{
+    fn new() -> Self{
+        DefaultInitializer{
+            _data : PhantomData
+        }
+    }
+}
+
+impl<T : Default> HubsInitializer for DefaultInitializer<T>{
+    type T=T;
+    fn initialize_data(&self)-> Self::T {
+        T::default()
+    }
+}
+
 impl<T> Hubs<T>{
 
-
+    /**
+    Creates a new [Hubs] with the given initializer.
+    The created [Hubs] has a fixed capacity to holt Chunks, that cannot be changed after creation.
+    After initialization, you can get useable 
+    */
     pub fn new(initializer: &dyn HubsInitializer<T=T>) -> Self{
 
         let mut chunks = Vec::with_capacity(128);

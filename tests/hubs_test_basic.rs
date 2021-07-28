@@ -335,5 +335,16 @@ mod tests {
         assert_eq!(iter.next(), None );
         assert_eq!( rx.get_chunks_for_tick().into_iter().next(), None);        
     }
+
+    #[test]
+    fn test_with_default() {
+        let hubs = Hubs::<u64>::new_default();
+        let (mut tx,_) = hubs.split();
+
+        let chunk = tx.borrow_chunk_mut().unwrap();
+        let old_value = chunk.chunk.data[0];
+        assert_eq!(old_value, 0)
+     
+    }
 }
 
