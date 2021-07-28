@@ -10,7 +10,7 @@ Access is possible through the xxx and xxx
 pub struct Hubs<T>{
     inner: HubsInner<T>
 }
-impl<T> Hubs<T> where T:Clone,T:Default, T:Debug{
+impl<T> Hubs<T>{
     /**
     Take Ownership of the hubs and split it.
     */
@@ -50,13 +50,13 @@ pub trait HubsInitializer{
     fn initialize_data(&self)-> Self::T;
 }
 
-#[derive(Debug)]
+
 pub struct Chunk<T>{
     capacity: usize,
     pub used: usize,
     pub data: Box<[T]>
 }
-impl<T> Chunk<T> where T:Clone,T:Default{
+impl<T> Chunk<T> {
     fn new(initializer: &dyn HubsInitializer<T=T>) -> Self{
         let mut v = Vec::with_capacity(CHUNK_SIZE);
         for _ in 0 .. CHUNK_SIZE{
@@ -77,13 +77,13 @@ pub struct HubsConsumer<T>{
     inner: Arc<HubsInner<T>>
 }
 
-impl<T> HubsConsumer<T> where T:Clone,T:Default, T:Debug{
+impl<T> HubsConsumer<T>{
     pub fn get_chunks_for_tick(&self) -> ChunkBlock<T>{
         self.inner.get_read_chunks_current()
     }
 }
 
-impl<T> HubsProducer<T> where T:Clone,T:Default, T:Debug{
+impl<T> HubsProducer<T>{
     pub fn borrow_chunk_mut(&mut self) -> Option<HubsWriteAccess<T>>{
         self.inner.borrow_chunk_mut()
     }
@@ -104,14 +104,14 @@ struct HubsInner<T>{
     // is_write_block_borrowed: AtomicBool
 }
 
-pub struct ChunkBlock<'a,T>  where T:Clone,T:Default, T:Debug{
+pub struct ChunkBlock<'a,T> {
     chunks: ChunkBlockData<'a, T>,
     parent: Option<&'a HubsInner<T>>,
     current_chunk_index: usize,
     in_chunk_index: usize
 }
 
-impl <'a,T> Iterator for ChunkBlock<'a,T>  where T:Clone,T:Default, T:Debug{
+impl <'a,T> Iterator for ChunkBlock<'a,T>{
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -139,7 +139,7 @@ impl <'a,T> Iterator for ChunkBlock<'a,T>  where T:Clone,T:Default, T:Debug{
 }
 
 
-impl <'a,T> ChunkBlock<'a,T>  where T:Clone,T:Default, T:Debug{
+impl <'a,T> ChunkBlock<'a,T>{
 
     fn new( chunks: ChunkBlockData<'a, T>, parent: &'a HubsInner<T>) -> Self{
         ChunkBlock{
@@ -191,14 +191,14 @@ impl <'a,T> ChunkBlock<'a,T>  where T:Clone,T:Default, T:Debug{
 }
 
 
-enum ChunkBlockData<'a,T>  where T:Clone,T:Default, T:Debug{
+enum ChunkBlockData<'a,T>{
     One(&'a [Chunk<T>]),
     Two(&'a [Chunk<T>], &'a [Chunk<T>]),
     None
 }
 
 
-impl <'a,T> Drop for ChunkBlock<'a,T>  where T:Clone,T:Default, T:Debug{
+impl <'a,T> Drop for ChunkBlock<'a,T>{
     fn drop(&mut self) {
         match self.parent{
             Some(parent) =>parent.return_chunk_block(self),
@@ -212,7 +212,7 @@ pub struct HubsWriteAccess<'a,T> {
     parent: &'a HubsInner<T>
 }
 
-impl <'a,T> HubsWriteAccess<'a,T> where T:Clone,T:Default, T:Debug{
+impl <'a,T> HubsWriteAccess<'a,T>{
     pub fn commit(self) {
         self.parent.commit_chunk(self);
     }
@@ -220,7 +220,7 @@ impl <'a,T> HubsWriteAccess<'a,T> where T:Clone,T:Default, T:Debug{
 
 
 
-impl<T> HubsInner<T> where T:Clone, T:Default, T:Debug{
+impl<T> HubsInner<T>{
     fn get_read_chunks_current(&self) -> ChunkBlock<T>{
 
         let read_end = self.write_barrier.load(Ordering::SeqCst);
@@ -268,7 +268,7 @@ impl<T> HubsInner<T> where T:Clone, T:Default, T:Debug{
 
         /*
          SAFETY:
-         
+
          */
         let chunk = unsafe{ &mut(*self.chunks.get())[write_pos] };
         Some(HubsWriteAccess{
