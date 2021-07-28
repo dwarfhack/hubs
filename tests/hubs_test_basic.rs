@@ -5,7 +5,7 @@ mod tests {
 
     use std::{sync::mpsc, thread::{self, sleep}, time::Duration};
 
-    use hubs::{HUBS_SIZE, HubsInitializer};
+    use hubs::HubsInitializer;
 
     use hubs::Hubs;
     
@@ -85,10 +85,11 @@ mod tests {
     #[test]
     fn test_full() {
         let hubs = Hubs::new(&HubsInitializerU64{});
+        let cap = hubs.capacity();
         let (mut tx,rx) = hubs.split();
 
         let j = thread::spawn(move || {
-            for i in 0 .. HUBS_SIZE{
+            for i in 0 .. cap{
                 match tx.borrow_chunk_mut(){
                     Some(chunk) => {
                         chunk.chunk.data[0] = i as u64;
@@ -104,7 +105,7 @@ mod tests {
         });
 
         let amt = j.join().unwrap();
-        assert_eq!(amt,HUBS_SIZE-1);
+        assert_eq!(amt,cap-1);
 
         let mut iter = rx.get_chunks_for_tick().into_iter();
         for i in 0 .. amt{
@@ -170,6 +171,9 @@ mod tests {
 
     #[test]
     fn test_stress_small(){
+
+        let default_hubs_cap = Hubs::new(&HubsInitializerU64{}).capacity();
+
         test_stress(      1);
         test_stress(     10);
         test_stress(    100);
@@ -181,12 +185,12 @@ mod tests {
         test_stress(23_339);
 
 
-        test_stress(HUBS_SIZE  as u64 - 1);
-        test_stress(HUBS_SIZE  as u64    );
-        test_stress(HUBS_SIZE  as u64 + 1);
+        test_stress(default_hubs_cap  as u64 - 1);
+        test_stress(default_hubs_cap  as u64    );
+        test_stress(default_hubs_cap  as u64 + 1);
 
-        test_stress(HUBS_SIZE  as u64 / 2);
-        test_stress(HUBS_SIZE  as u64 * 2);
+        test_stress(default_hubs_cap  as u64 / 2);
+        test_stress(default_hubs_cap  as u64 * 2);
 
         test_stress_multiple_data(    1,  1);
         test_stress_multiple_data(   10, 10);
@@ -272,7 +276,7 @@ mod tests {
                 loop{
                     match tx.borrow_chunk_mut(){
                         Some(chunk) => {
-                            for k in 0 .. data_count{
+                            for k in 0 .. usize::min(chunk.chunk.capacity ,data_count){
                                 chunk.chunk.data[k] = ctr;
                                 ctr += 1;
                             }
@@ -310,4 +314,26 @@ mod tests {
         assert_eq!(ctr as usize, chunk_count*data_count);
         j.join().unwrap();       
     }
+
+    #[test]
+    fn test_with_capacity() {
+        let hubs = Hubs::with_capacity(3,&HubsInitializerU64{});
+        let (mut tx,rx) = hubs.split();
+
+        for i in 0 ..2 {
+            let chunk = tx.borrow_chunk_mut().unwrap();
+            chunk.chunk.data[0] = i;
+            chunk.chunk.used += 1;
+            chunk.commit();
+        }
+
+        assert!(tx.borrow_chunk_mut().is_none(),"Hubs has to be full with custom capacity");
+
+        let mut iter = rx.get_chunks_for_tick().into_iter();
+        assert_eq!(* iter.next().unwrap(), 0 );
+        assert_eq!(* iter.next().unwrap(), 1 );
+        assert_eq!(iter.next(), None );
+        assert_eq!( rx.get_chunks_for_tick().into_iter().next(), None);        
+    }
 }
+

@@ -1,7 +1,13 @@
-use std::{cell::UnsafeCell, fmt::Debug, sync::{Arc, atomic::{ AtomicUsize, Ordering}}};
+use std::{cell::UnsafeCell, sync::{Arc, atomic::{ AtomicUsize, Ordering}}};
 
-pub const HUBS_SIZE: usize = 4096;
-pub const CHUNK_SIZE: usize = 4096;
+/**
+Global
+*/
+
+
+
+const HUBS_SIZE: usize = 4096;
+const CHUNK_SIZE: usize = 4096;
 
 /**
 The Hubs data structure used for initialization.
@@ -11,19 +17,7 @@ pub struct Hubs<T>{
     inner: HubsInner<T>
 }
 impl<T> Hubs<T>{
-    /**
-    Take Ownership of the hubs and split it.
-    */
-    pub fn split(self) -> (HubsProducer<T>, HubsConsumer<T>){
-        let inner = Arc::new(self.inner);
-        let tx = HubsProducer{
-            inner: Arc::clone(&inner)
-        };
-        let rx = HubsConsumer{
-            inner: Arc::clone(&inner)
-        };
-        (tx,rx)
-    }
+
 
     pub fn new(initializer: &dyn HubsInitializer<T=T>) -> Self{
 
@@ -39,9 +33,50 @@ impl<T> Hubs<T>{
                 read_ptr: AtomicUsize::new(0),
                 read_barrier: AtomicUsize::new(HUBS_SIZE-1),
                 write_ptr: AtomicUsize::new(0),
-                write_barrier: AtomicUsize::new(0)
+                write_barrier: AtomicUsize::new(0),
+                capacity: HUBS_SIZE
             } 
         }
+    }
+    pub fn with_capacity(capacity:usize, initializer: &dyn HubsInitializer<T=T>) -> Self{
+
+        let mut chunks = Vec::with_capacity(128);
+        for _i in 0..capacity{
+            chunks.push(Chunk::new(initializer));
+        }
+        let chunks = chunks.into_boxed_slice();
+
+        Hubs{
+           inner: HubsInner{
+                chunks: UnsafeCell::from(chunks),
+                read_ptr: AtomicUsize::new(0),
+                read_barrier: AtomicUsize::new(capacity-1),
+                write_ptr: AtomicUsize::new(0),
+                write_barrier: AtomicUsize::new(0),
+                capacity
+            } 
+        }
+    }
+
+        /**
+    Take Ownership of the hubs and split it.
+    */
+    pub fn split(self) -> (HubsProducer<T>, HubsConsumer<T>){
+        let inner = Arc::new(self.inner);
+        let tx = HubsProducer{
+            inner: Arc::clone(&inner)
+        };
+        let rx = HubsConsumer{
+            inner: Arc::clone(&inner)
+        };
+        (tx,rx)
+    }
+
+        /**
+    Take Ownership of the hubs and split it.
+    */
+    pub fn capacity(&self) -> usize{
+        self.inner.capacity
     }
 }
 
@@ -52,7 +87,7 @@ pub trait HubsInitializer{
 
 
 pub struct Chunk<T>{
-    capacity: usize,
+    pub capacity: usize,
     pub used: usize,
     pub data: Box<[T]>
 }
@@ -63,7 +98,7 @@ impl<T> Chunk<T> {
             v.push(initializer.initialize_data());
         }
         Chunk{
-            capacity: 128,
+            capacity: CHUNK_SIZE,
             used: 0,
             data: v.into_boxed_slice(),
         }
@@ -101,7 +136,7 @@ struct HubsInner<T>{
     read_ptr: AtomicUsize,
     write_ptr: AtomicUsize,
     write_barrier: AtomicUsize,
-    // is_write_block_borrowed: AtomicBool
+    capacity: usize
 }
 
 pub struct ChunkBlock<'a,T> {
@@ -262,7 +297,7 @@ impl<T> HubsInner<T>{
             return None;
         }
 
-        let next_write_pos = (write_pos + 1) % HUBS_SIZE;
+        let next_write_pos = (write_pos + 1) % self.capacity;
 
         self.write_ptr.store( next_write_pos, Ordering::SeqCst);
 
@@ -282,7 +317,7 @@ impl<T> HubsInner<T>{
         let read_end = self.read_barrier.load(Ordering::SeqCst);
         let mut read_ptr = self.read_ptr.load(Ordering::SeqCst);
 
-        read_ptr =  ( HUBS_SIZE + read_ptr - 1 ) % HUBS_SIZE;
+        read_ptr =  ( self.capacity + read_ptr - 1 ) % self.capacity;
 
         if read_ptr == read_end {
             panic!("Tried to return block to hubs that has no block given out")
@@ -294,12 +329,12 @@ impl<T> HubsInner<T>{
     fn commit_chunk(&self, _write_access: HubsWriteAccess<T>){
         let write_pos = self.write_ptr.load(Ordering::SeqCst);        
         let mut write_barrier = self.write_barrier.load(Ordering::SeqCst);
-        write_barrier = (write_barrier + 1) % HUBS_SIZE;
+        write_barrier = (write_barrier + 1) % self.capacity;
         if write_pos == write_barrier {
             self.write_barrier.store(write_barrier, Ordering::SeqCst);
         }
         else  {
-            panic!("Cant commit old chunk if alreadz borrowed new chunk")
+            panic!("Cant commit old chunk if already borrowed new chunk")
         }
     }
 }
