@@ -292,15 +292,16 @@ impl<T> HubsInner<T> where T:Clone, T:Default, T:Debug{
         //     panic!("Tried to return block to hubs that has no block given out")
         // }
 
-        let read_end = self.write_barrier.load(Ordering::SeqCst);
+        let read_end = self.read_barrier.load(Ordering::SeqCst);
         let mut read_ptr = self.read_ptr.load(Ordering::SeqCst);
 
-        if read_ptr != read_end {
+        read_ptr =  ( HUBS_SIZE + read_ptr - 1 ) % HUBS_SIZE;
+
+        if read_ptr == read_end {
             panic!("Tried to return block to hubs that has no block given out")
         }
 
         // let mut  read_ptr = self.read_ptr.load(Ordering::SeqCst);
-        read_ptr =  ( HUBS_SIZE + read_ptr - 1 ) % HUBS_SIZE;
         self.read_barrier.store(read_ptr, Ordering::SeqCst);
         // self.is_write_block_borrowed.store(false,Ordering::SeqCst)
     }
@@ -421,7 +422,7 @@ mod tests {
         let (mut tx,rx) = hubs.split();
 
         let j = thread::spawn(move || {
-            for i in 0 .. 200{
+            for i in 0 .. HUBS_SIZE{
                 match tx.borrow_chunk_mut(){
                     Some(chunk) => {
                         chunk.chunk.data[0] = i as u64;
@@ -433,7 +434,7 @@ mod tests {
                     }
                 }
             }
-            return 0
+            return 0 // overfull
         });
 
         let amt = j.join().unwrap();
@@ -570,15 +571,17 @@ mod tests {
 
         let mut ctr = 0;
 
-        loop  {
+        let mut last_try=false;
+        while !last_try  {
+            if mpsc_rx.try_recv().is_ok() {
+                last_try = true;
+                sleep(Duration::from_millis(7))
+            }     
             for i in rx.get_chunks_for_tick().into_iter(){
                 assert_eq!(*i, ctr);
                 ctr +=1;
-            }
-            if mpsc_rx.try_recv().is_ok() {
-                break
-            }                            
-            sleep(Duration::from_nanos(7))
+            }       
+            sleep(Duration::from_nanos(10))      
         }
        
         assert_eq!( rx.get_chunks_for_tick().into_iter().next(), None);        
@@ -624,15 +627,17 @@ mod tests {
     
         let mut ctr = 0;
     
-        loop  {
-            for i in rx.get_chunks_for_tick().into_iter(){
-                assert_eq!(*i,ctr);
-                ctr +=1;
-            }
+        let mut last_try=false;
+        while !last_try  {
             if mpsc_rx.try_recv().is_ok() {
-                break
-            }                            
-            sleep(Duration::from_millis(1));
+                last_try = true;
+                sleep(Duration::from_millis(7))
+            }     
+            for i in rx.get_chunks_for_tick().into_iter(){
+                assert_eq!(*i, ctr);
+                ctr +=1;
+            }          
+            sleep(Duration::from_nanos(10))   
         }
        
         assert_eq!( rx.get_chunks_for_tick().into_iter().next(), None);        
