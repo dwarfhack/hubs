@@ -184,7 +184,6 @@ mod tests {
         test_stress(35_251);
         test_stress(23_339);
 
-
         test_stress(default_hubs_cap  as u64 - 1);
         test_stress(default_hubs_cap  as u64    );
         test_stress(default_hubs_cap  as u64 + 1);
@@ -194,18 +193,19 @@ mod tests {
 
         test_stress_multiple_data(    1,  1);
         test_stress_multiple_data(   10, 10);
+        test_stress_multiple_data(   10,100);
         test_stress_multiple_data(  100,100);
         test_stress_multiple_data(1_000, 10);
-
-        test_stress_multiple_data(1_000, 128);
-        test_stress_multiple_data(1_000, 127);
-
+        test_stress_multiple_data(1_000,128);
+        test_stress_multiple_data(1_000,127);
     }
 
     #[test]
-    #[ignore = "takes long"]
+    #[ignore = "takes a while"]
     fn test_stress_large(){
+
         test_stress( 10_000_000);
+
     }
     
     fn test_stress(amt: u64) {
@@ -245,7 +245,7 @@ mod tests {
         while !last_try  {
             if mpsc_rx.try_recv().is_ok() {
                 last_try = true;
-                sleep(Duration::from_millis(7))
+                sleep(Duration::from_millis(1))
             }     
             for i in rx.get_chunks_for_tick().into_iter(){
                 assert_eq!(*i, ctr);
