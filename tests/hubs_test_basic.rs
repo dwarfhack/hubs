@@ -142,7 +142,7 @@ mod tests {
                 }
 
             }
-            mpsc_tx.send(0u8);
+            mpsc_tx.send(0u8).unwrap();
         });
 
         sleep(Duration::from_millis(1));
@@ -168,6 +168,48 @@ mod tests {
 
         j.join().unwrap();        
     }
+
+    #[test]
+    #[should_panic]
+    fn test_cannot_get_two_writeable_chunks() {
+        let hubs = Hubs::new_default();
+        let (mut tx,_) = hubs.split();
+        let chunk = tx.borrow_chunk_mut().unwrap();
+        chunk.chunk.data[0] = 42;
+        let _illegal = tx.borrow_chunk_mut(); 
+    }
+
+    #[test]
+    fn test_reading_does_not_modify_writeability() {
+        let hubs = Hubs::with_capacity(10, &HubsInitializerU64{});
+        let (_, rx) = hubs.split();
+
+        // check that reading does not modify state
+        for _ in 0 .. 77 {
+            rx.get_chunks_for_tick();
+        }
+        assert_eq!( rx.get_chunks_for_tick().into_iter().next(), None);
+    }
+
+    #[test]
+    fn test_iterator_drop_clears() {
+        let hubs = Hubs::with_capacity(10, &HubsInitializerU64{});
+        let (mut tx,rx) = hubs.split();
+
+        for _ in 0 .. 7 {
+            let c = tx.borrow_chunk_mut().expect("writeable");
+            c.commit();
+        }
+        {
+            let x = rx.get_chunks_for_tick();
+            drop(x);
+        }
+        for _ in 0 .. 7 {
+            let c = tx.borrow_chunk_mut().expect("writeable");
+            c.commit();
+        }
+    }
+
 
     #[test]
     fn test_stress_small(){

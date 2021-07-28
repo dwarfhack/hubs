@@ -41,10 +41,10 @@ Operation works as follows:
     // In 7 Chunks, write the first 9 elements
     for i in 0 .. 7{
         match tx.borrow_chunk_mut(){
-            Some(chunk) => {
+            Some(guard) => {
                 for k in 0 .. 9 {
-                    chunk.chunk.data[k] = i*k as u64;
-                    chunk.chunk.used += 1;
+                    guard.chunk.data[k] = i*k as u64;
+                    guard.chunk.used += 1;
                 }
                 chunk.commit();
             },
