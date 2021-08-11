@@ -5,6 +5,7 @@ authors = ["Marco Amann <marco@pfudi.de>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
 description = "The horribly unsafe buffer structure"
+documentation = "https://docs.rs/hubs/0.1.0/hubs/"
 homepage = "https://amann.dev/projects/hubs/"
 readme = "README.md"
 repository = "https://github.com/dwarfhack/hubs"
