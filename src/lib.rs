@@ -188,8 +188,11 @@ pub trait HubsInitializer{
 
 */
 pub struct Chunk<T>{
+    /// The capacity of this chunk, do not change
     pub capacity: usize,
+    /// Count of used elements in this chunk. Set this before you commit
     pub used: usize,
+    /// The data in this chunk. Feel free to borrow the data to other functions, e.g. a network receive
     pub data: Box<[T]>
 }
 impl<T> Chunk<T> {
