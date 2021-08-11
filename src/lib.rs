@@ -32,8 +32,7 @@ Operation works as follows:
 
 # Example
 ```
-    use hubs::HubsInitializer;
-    use hubs::Hubs;
+    use hubs::{Hubs, HubsInitializer, HubsWriteAccess};
 
     let hubs = Hubs::new_default();
     let (mut tx,rx) = hubs.split();
@@ -46,7 +45,7 @@ Operation works as follows:
                     guard.chunk.data[k] = i*k as u64;
                     guard.chunk.used += 1;
                 }
-                chunk.commit();
+                guard.commit();
             },
             None => panic!("Must not be full")
         };
